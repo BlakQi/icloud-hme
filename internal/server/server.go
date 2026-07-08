@@ -62,8 +62,11 @@ func (s *Server) register() {
 		// ===== 核心接口 2: 读取邮件 =====
 		api.GET("/inbox", s.listInbox)
 
-		// ===== 辅助 =====
+		// ===== 别名管理 =====
 		api.GET("/aliases", s.listAliases)
+		api.POST("/aliases/:id/deactivate", s.deactivateAlias)
+		api.POST("/aliases/:id/reactivate", s.reactivateAlias)
+		api.DELETE("/aliases/:id", s.deleteAlias)
 	}
 }
 
@@ -260,6 +263,75 @@ func (s *Server) listAliases(c *gin.Context) {
 		"count":      len(aliases),
 		"aliases":    aliases,
 	})
+}
+
+type aliasActionReq struct {
+	AccountID string `json:"account_id" binding:"required"`
+}
+
+func (s *Server) deactivateAlias(c *gin.Context) {
+	anonymousID := c.Param("id")
+	var req aliasActionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "参数错误: account_id 必填 — "+err.Error())
+		return
+	}
+
+	client, err := s.mgr.HMEClient(req.AccountID, false)
+	if err != nil {
+		fail(c, http.StatusNotFound, err.Error())
+		return
+	}
+
+	success, err := client.DeactivateHME(anonymousID)
+	if err != nil {
+		fail(c, http.StatusBadGateway, "停用失败: "+err.Error())
+		return
+	}
+	ok(c, gin.H{"anonymous_id": anonymousID, "success": success})
+}
+
+func (s *Server) reactivateAlias(c *gin.Context) {
+	anonymousID := c.Param("id")
+	var req aliasActionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "参数错误: account_id 必填 — "+err.Error())
+		return
+	}
+
+	client, err := s.mgr.HMEClient(req.AccountID, false)
+	if err != nil {
+		fail(c, http.StatusNotFound, err.Error())
+		return
+	}
+
+	success, err := client.ReactivateHME(anonymousID)
+	if err != nil {
+		fail(c, http.StatusBadGateway, "激活失败: "+err.Error())
+		return
+	}
+	ok(c, gin.H{"anonymous_id": anonymousID, "success": success})
+}
+
+func (s *Server) deleteAlias(c *gin.Context) {
+	anonymousID := c.Param("id")
+	var req aliasActionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		fail(c, http.StatusBadRequest, "参数错误: account_id 必填 — "+err.Error())
+		return
+	}
+
+	client, err := s.mgr.HMEClient(req.AccountID, false)
+	if err != nil {
+		fail(c, http.StatusNotFound, err.Error())
+		return
+	}
+
+	if err := client.Delete(anonymousID); err != nil {
+		fail(c, http.StatusBadGateway, "删除失败: "+err.Error())
+		return
+	}
+	ok(c, gin.H{"anonymous_id": anonymousID})
 }
 
 // isSessionError 判断错误是否由会话失效引起。

@@ -22,7 +22,9 @@ import (
 
 const (
 	// ClientBuildNumber 是 iCloud Web 客户端构建号,从浏览器抓包获取。
-	ClientBuildNumber = "2206Hotfix11"
+	ClientBuildNumber = "2536Project32"
+	// ClientMasteringNumber 是 iCloud Web 客户端主版本号。
+	ClientMasteringNumber = "2536B20"
 	// RequestTimeout 单次请求超时。
 	RequestTimeout = 15 * time.Second
 	// MaxRetries 最大重试次数。
@@ -150,7 +152,7 @@ func (c *Client) buildURL(rawURL string) string {
 	}
 	q := parsed.Query()
 	q.Set("clientBuildNumber", ClientBuildNumber)
-	q.Set("clientMasteringNumber", ClientBuildNumber)
+	q.Set("clientMasteringNumber", ClientMasteringNumber)
 	parsed.RawQuery = q.Encode()
 	return parsed.String()
 }
@@ -424,6 +426,34 @@ func (c *Client) CreateAlias(label string, maxRetries int) (*CreateResult, error
 		return nil, fmt.Errorf("创建别名失败: %s", lastErr)
 	}
 	return nil, fmt.Errorf("创建别名失败,已重试 %d 次", maxRetries)
+}
+
+// DeactivateHME 停用别名(可恢复)。
+func (c *Client) DeactivateHME(anonymousID string) (bool, error) {
+	if err := c.resolveService(); err != nil {
+		return false, err
+	}
+	c.log("停用 %s ...", anonymousID)
+	payload := map[string]string{"anonymousId": anonymousID}
+	body, err := c.request("POST", c.serviceURL+"/v1/hme/deactivate", payload, 0, 2)
+	if err != nil {
+		return false, err
+	}
+	return gjson.Get(body, "success").Bool(), nil
+}
+
+// ReactivateHME 激活已停用的别名。
+func (c *Client) ReactivateHME(anonymousID string) (bool, error) {
+	if err := c.resolveService(); err != nil {
+		return false, err
+	}
+	c.log("激活 %s ...", anonymousID)
+	payload := map[string]string{"anonymousId": anonymousID}
+	body, err := c.request("POST", c.serviceURL+"/v1/hme/reactivate", payload, 0, 2)
+	if err != nil {
+		return false, err
+	}
+	return gjson.Get(body, "success").Bool(), nil
 }
 
 // Delete 删除别名。若直接删除失败会先停用再删。

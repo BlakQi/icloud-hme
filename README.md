@@ -224,6 +224,65 @@ GET /api/aliases?account_id=acc_1
 }
 ```
 
+#### 停用别名
+
+```bash
+POST /api/aliases/:id/deactivate
+
+# 请求体
+{
+  "account_id": "acc_1"
+}
+
+# 响应
+{
+  "success": true,
+  "data": {
+    "anonymous_id": "abc123",
+    "success": true
+  }
+}
+```
+
+#### 激活别名
+
+```bash
+POST /api/aliases/:id/reactivate
+
+# 请求体
+{
+  "account_id": "acc_1"
+}
+
+# 响应
+{
+  "success": true,
+  "data": {
+    "anonymous_id": "abc123",
+    "success": true
+  }
+}
+```
+
+#### 删除别名
+
+```bash
+DELETE /api/aliases/:id
+
+# 请求体
+{
+  "account_id": "acc_1"
+}
+
+# 响应
+{
+  "success": true,
+  "data": {
+    "anonymous_id": "abc123"
+  }
+}
+```
+
 ## 认证方式
 
 ### 方式一: Cookie 认证 (推荐)

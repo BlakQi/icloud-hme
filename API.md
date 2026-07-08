@@ -131,14 +131,9 @@ Content-Type: application/json
 
 {
   "name": "新账号",
-  "cookies": [
-    {
-      "domain": ".icloud.com",
-      "name": "x-apple-session-token",
-      "value": "token_value"
-    }
-  ],
-  "host": "imap.mail.me.com"
+  "cookies": "{\"x-apple-session-token\":\"token_value\"}",
+  "host": "imap.mail.me.com",
+  "proxy": "http://user:pass@host:port"
 }
 ```
 
@@ -156,7 +151,11 @@ Content-Type: application/json
 
 **参数说明:**
 - `name` (必填) — 账号名称
-- `cookies` (必填) — Cookie 数组
+- `cookies` (必填) — Cookie 字符串，支持两种格式：
+  - JSON: `"{\"name\":\"value\"}"`
+  - Header: `"name1=value1; name2=value2"`
+- `host` (可选) — iCloud 域名，默认 `icloud.com`
+- `proxy` (可选) — HTTP/SOCKS5 代理
 - `host` (可选) — IMAP 服务器地址，默认 `imap.mail.me.com`
 
 **Cookie 格式:**

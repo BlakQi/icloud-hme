@@ -26,6 +26,7 @@ type Account struct {
 	ICloudEmail  string            `json:"icloud_email"`
 	Cookies      map[string]string `json:"cookies"`
 	Host         string            `json:"host"`
+	Proxy        string            `json:"proxy,omitempty"` // HTTP/SOCKS5 代理
 	AppPassword  string            `json:"app_password,omitempty"`
 	Status       string            `json:"status"` // active / error
 	AliasTotal   int               `json:"alias_total"`
@@ -146,7 +147,7 @@ func ParseCookieInput(raw string) (map[string]string, error) {
 //
 // cookieInput 支持 Header String 或 JSON。校验失败仍会保存账号(status=error),
 // 方便用户后续修正 Cookie 后重新校验。
-func (m *Manager) AddAccount(name, cookieInput, host string) (*Account, error) {
+func (m *Manager) AddAccount(name, cookieInput, host, proxy string) (*Account, error) {
 	cookies, err := ParseCookieInput(cookieInput)
 	if err != nil {
 		return nil, err
@@ -160,12 +161,13 @@ func (m *Manager) AddAccount(name, cookieInput, host string) (*Account, error) {
 		Name:      name,
 		Cookies:   cookies,
 		Host:      host,
+		Proxy:     proxy,
 		Status:    "active",
 		CreatedAt: time.Now().Format(time.RFC3339),
 	}
 
 	// 校验会话 + 抓取真实邮箱和别名数。
-	client, err := hme.NewClient(cookies, host, false)
+	client, err := hme.NewClient(cookies, host, proxy, false)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +245,7 @@ func (m *Manager) HMEClient(id string, verbose bool) (*hme.Client, error) {
 	if !ok {
 		return nil, fmt.Errorf("账号不存在: %s", id)
 	}
-	return hme.NewClient(acc.Cookies, acc.Host, verbose)
+	return hme.NewClient(acc.Cookies, acc.Host, acc.Proxy, verbose)
 }
 
 // MailClient 为指定账号创建 IMAP 邮件客户端。

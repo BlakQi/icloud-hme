@@ -192,6 +192,7 @@ type addAccountReq struct {
 	Name     string `json:"name" binding:"required"`
 	Cookies  string `json:"cookies" binding:"required"`
 	Host     string `json:"host"`
+	Proxy    string `json:"proxy"` // HTTP/SOCKS5 代理
 }
 
 func (s *Server) addAccount(c *gin.Context) {
@@ -200,7 +201,7 @@ func (s *Server) addAccount(c *gin.Context) {
 		fail(c, http.StatusBadRequest, "参数错误: name, cookies 必填 — "+err.Error())
 		return
 	}
-	acc, err := s.mgr.AddAccount(req.Name, req.Cookies, req.Host)
+	acc, err := s.mgr.AddAccount(req.Name, req.Cookies, req.Host, req.Proxy)
 	if err != nil {
 		fail(c, http.StatusBadRequest, err.Error())
 		return

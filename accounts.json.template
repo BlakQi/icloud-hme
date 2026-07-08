@@ -4,6 +4,7 @@
       "id": "acc_1",
       "name": "主号",
       "host": "imap.mail.me.com",
+      "proxy": "",
       "cookies": [
         {
           "domain": ".icloud.com",

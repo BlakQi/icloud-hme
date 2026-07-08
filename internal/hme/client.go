@@ -62,6 +62,7 @@ type Alias struct {
 type Client struct {
 	Cookies     map[string]string
 	Host        string // "icloud.com" 或 "icloud.com.cn"
+	Proxy       string // HTTP/SOCKS5 代理
 	Verbose     bool
 	httpc       tls_client.HttpClient
 	setupURL    string
@@ -69,8 +70,12 @@ type Client struct {
 	accountInfo *AccountInfo
 }
 
-// NewClient 创建一个新的 HME 客户端,底层使用 Chrome 124 TLS 指纹。
-func NewClient(cookies map[string]string, host string, verbose bool) (*Client, error) {
+// NewClient 创建一个新的 HME 客户端,底层使用 Chrome TLS 指纹。
+//
+// proxy 支持格式:
+//   - HTTP:  "http://user:pass@host:port"
+//   - SOCKS5: "socks5://user:pass@host:port"
+func NewClient(cookies map[string]string, host, proxy string, verbose bool) (*Client, error) {
 	if host == "" {
 		host = "icloud.com"
 	}
@@ -81,6 +86,12 @@ func NewClient(cookies map[string]string, host string, verbose bool) (*Client, e
 		tls_client.WithCookieJar(jar),
 		tls_client.WithNotFollowRedirects(),
 	}
+
+	// 添加代理支持
+	if proxy != "" {
+		options = append(options, tls_client.WithProxyUrl(proxy))
+	}
+
 	httpc, err := tls_client.NewHttpClient(tls_client.NewNoopLogger(), options...)
 	if err != nil {
 		return nil, err
@@ -89,6 +100,7 @@ func NewClient(cookies map[string]string, host string, verbose bool) (*Client, e
 	c := &Client{
 		Cookies: cookies,
 		Host:    normalizeHost(host),
+		Proxy:   proxy,
 		Verbose: verbose,
 		httpc:   httpc,
 	}

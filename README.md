@@ -150,10 +150,9 @@ POST /api/accounts
 # 请求体
 {
   "name": "新账号",
-  "cookies": [
-    {"domain": ".icloud.com", "name": "x-apple-session-token", "value": "token_value"}
-  ],
-  "host": "imap.mail.me.com"  # 可选: IMAP 服务器地址
+  "cookies": "{\"x-apple-session-token\":\"token_value\"}",  # JSON 或 Header 格式
+  "host": "imap.mail.me.com",  # 可选: iCloud 域名
+  "proxy": "http://user:pass@host:port"  # 可选: HTTP/SOCKS5 代理
 }
 
 # 响应

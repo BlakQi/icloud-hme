@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"icloud-hme/internal/hme"
+	"icloud-hme/internal/log"
 	"icloud-hme/internal/mail"
 )
 
@@ -58,6 +59,13 @@ func NewManager(dataDir string) (*Manager, error) {
 		return nil, err
 	}
 	return m, nil
+}
+
+// Reload 重新加载 accounts.json 配置文件。
+func (m *Manager) Reload() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.load()
 }
 
 func (m *Manager) load() error {
@@ -174,6 +182,7 @@ func (m *Manager) AddAccount(name, cookieInput, host, proxy string) (*Account, e
 
 	// 有 Cookie 才校验会话
 	if len(cookies) > 0 {
+		log.Logger.Debug().Str("id", acc.ID).Msg("校验 iCloud 会话...")
 		client, err := hme.NewClient(cookies, host, proxy, false)
 		if err != nil {
 			return nil, err
@@ -181,6 +190,7 @@ func (m *Manager) AddAccount(name, cookieInput, host, proxy string) (*Account, e
 		if err := client.ValidateSession(); err != nil {
 			acc.Status = "error"
 			acc.LastError = truncate(err.Error(), 300)
+			log.Logger.Warn().Err(err).Str("id", acc.ID).Msg("会话校验失败")
 		} else {
 			acc.Status = "active"
 			if info := client.AccountInfo(); info != nil {
@@ -196,6 +206,7 @@ func (m *Manager) AddAccount(name, cookieInput, host, proxy string) (*Account, e
 				}
 			}
 			acc.LastValidated = time.Now().Format(time.RFC3339)
+			log.Logger.Info().Str("id", acc.ID).Str("email", acc.RealEmail).Int("aliases", acc.AliasTotal).Msg("会话校验成功")
 		}
 	}
 
@@ -319,6 +330,30 @@ func (m *Manager) MailClient(id string) (*mail.Client, error) {
 	return mail.NewClient(imapEmail, acc.AppPassword), nil
 }
 
+// WebMailClient 为指定账号创建 Web 邮件客户端。
+// 使用 Cookie 认证，无需 App Password。
+func (m *Manager) WebMailClient(id string) (*mail.WebClient, error) {
+	m.mu.Lock()
+	acc, ok := m.accounts[id]
+	m.mu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("账号不存在: %s", id)
+	}
+	if len(acc.Cookies) == 0 {
+		return nil, fmt.Errorf("账号未配置 Cookie，无法读取邮件")
+	}
+	// 从 cookies 中获取 dsid
+	dsid := ""
+	if v, ok := acc.Cookies["X-APPLE-WEBAUTH-USER"]; ok {
+		// 解析 "v=1:s=1:d=22789132008" 格式
+		parts := strings.Split(v, ":d=")
+		if len(parts) == 2 {
+			dsid = parts[1]
+		}
+	}
+	return mail.NewWebClient(acc.Cookies, dsid, acc.Host), nil
+}
+
 // SetAppPassword 设置 iCloud 邮箱和 App 专用密码,并测试 IMAP 连接。
 func (m *Manager) SetAppPassword(id, icloudEmail, appPassword string) error {
 	m.mu.Lock()
@@ -337,13 +372,17 @@ func (m *Manager) SetAppPassword(id, icloudEmail, appPassword string) error {
 	// 测试连接
 	mc := mail.NewClient(icloudEmail, appPassword)
 	if err := mc.Connect(); err != nil {
+		log.Logger.Error().Err(err).Str("id", id).Msg("IMAP 连接测试失败")
 		return err
 	}
 	count, err := mc.InboxCount()
 	mc.Disconnect()
 	if err != nil {
+		log.Logger.Error().Err(err).Str("id", id).Msg("IMAP 收件箱数量获取失败")
 		return err
 	}
+
+	log.Logger.Info().Str("id", id).Str("email", icloudEmail).Int("inbox_count", count).Msg("IMAP 连接测试成功")
 
 	m.mu.Lock()
 	acc.ICloudEmail = icloudEmail
@@ -355,6 +394,69 @@ func (m *Manager) SetAppPassword(id, icloudEmail, appPassword string) error {
 	}
 	_ = count
 	return nil
+}
+
+// SaveCookies 保存指定账号的最新 Cookie（HMEClient 操作后刷新的 token）。
+// 用于客户端 validate/操作过程中从 Set-Cookie 获取了新 token 后持久化。
+func (m *Manager) SaveCookies(id string, cookies map[string]string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	acc, ok := m.accounts[id]
+	if !ok {
+		return fmt.Errorf("账号不存在: %s", id)
+	}
+	acc.Cookies = cookies
+	return m.save()
+}
+
+// UpdateCookies 更新指定账号的 Cookie,并自动校验会话有效性。
+func (m *Manager) UpdateCookies(id string, cookies map[string]string) error {
+	if len(cookies) == 0 {
+		return fmt.Errorf("cookies 不能为空")
+	}
+	m.mu.Lock()
+	acc, ok := m.accounts[id]
+	m.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("账号不存在: %s", id)
+	}
+
+	// 自动校验 Cookie 是否有效
+	acc.Cookies = cookies
+	if acc.Host == "" {
+		acc.Host = "icloud.com"
+	}
+	client, err := hme.NewClient(cookies, acc.Host, acc.Proxy, false)
+	if err != nil {
+		m.mu.Lock()
+		acc.Status = "error"
+		acc.LastError = "创建客户端失败: " + err.Error()
+		m.accounts[id] = acc
+		_ = m.save()
+		m.mu.Unlock()
+		return err
+	}
+	if err := client.ValidateSession(); err != nil {
+		log.Logger.Warn().Err(err).Str("id", id).Msg("Cookie 校验失败,仍已保存")
+		acc.Status = "error"
+		acc.LastError = "Cookie 校验失败: " + err.Error()
+	} else {
+		acc.Status = "active"
+		acc.LastValidated = time.Now().Format(time.RFC3339)
+		acc.LastError = ""
+		if info := client.AccountInfo(); info != nil {
+			acc.RealEmail = firstNonEmpty(info.AppleID, info.PrimaryEmail)
+			if acc.ICloudEmail == "" {
+				acc.ICloudEmail = deriveICloudEmail(info)
+			}
+		}
+	}
+
+	m.mu.Lock()
+	m.accounts[id] = acc
+	saveErr := m.save()
+	m.mu.Unlock()
+	return saveErr
 }
 
 // ---- 辅助函数 ----

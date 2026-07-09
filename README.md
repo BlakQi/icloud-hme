@@ -8,9 +8,10 @@
 
 - ✅ **创建 HME 别名** — 自动生成 iCloud 隐藏邮箱地址
 - ✅ **列出所有别名** — 查看账号下的所有 HME 别名
-- ✅ **收取邮件** — 通过 IMAP 读取发到 HME 别名的邮件
+- ✅ **收取邮件** — 通过 IMAP 或 Web API 读取发到 HME 别名的邮件
+- ✅ **双路径读信** — 邮件读取优先走 IMAP (App Password),无 App Password 时回退 Web API (Cookie)
 - ✅ **多账号管理** — 支持多个 iCloud 账号并行管理
-- ✅ **双认证模式** — 支持 Cookie 和 App Password 两种认证方式
+- ✅ **双认证模式** — Cookie (创建别名 + 读邮件回退) 和 App Password (IMAP 优先)
 
 ## 快速开始
 
@@ -102,7 +103,7 @@ GET /api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=20&days=7
 #   account_id - 必填: 账号 ID
 #   alias      - 可选: 只读取发到该别名的邮件
 #   limit      - 可选: 返回邮件数量 (默认 20)
-#   days       - 可选: 查找最近几天的邮件 (默认 7)
+#   days       - 可选: 查找最近几天的邮件 (默认 7,仅 IMAP 模式)
 
 # 响应
 {
@@ -110,19 +111,24 @@ GET /api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=20&days=7
   "data": {
     "account_id": "acc_1",
     "alias": "xyz123@icloud.com",
-    "count": 5,
+    "count": 2,
+    "method": "imap",
     "messages": [
       {
-        "uid": 12345,
-        "subject": "欢迎注册",
+        "id": "1042",
         "from": "noreply@example.com",
-        "to": ["xyz123@icloud.com"],
-        "date": "2024-01-15T10:35:00Z",
-        "body": "感谢您的注册..."
+        "to": "xyz123@icloud.com",
+        "subject": "欢迎注册",
+        "preview": "感谢您的注册...",
+        "date": "2026-07-09T14:32:10+08:00"
       }
     ]
   }
 }
+
+# 读取方式 (自动选择):
+#   method: "imap"    — 通过 App Password 认证 (优先)
+#   method: "web_api" — 通过 Cookie 认证,无需 App Password (回退)
 ```
 
 ### 账号管理接口
@@ -333,49 +339,47 @@ DELETE /api/aliases/:id
 
 ## 认证方式
 
-### 方式一: Cookie 认证 (推荐)
+### 方式一: Cookie 认证 (推荐,功能最完整)
 
-Cookie 认证可以创建别名和读取邮件。
+Cookie 认证可实现所有功能:创建别名、读取邮件、管理别名。
+
+**适用范围:**
+- 创建/停用/激活/删除 HME 别名 ✅
+- 读取邮件 (通过 iCloud Web API,无需 App Password) ✅
 
 **获取 Cookie:**
 
-1. 使用浏览器登录 [iCloud.com](https://www.icloud.com)
+1. 使用浏览器登录 [icloud.com](https://www.icloud.com) 或 [icloud.com.cn](https://www.icloud.com.cn) (国区)
 2. 打开浏览器开发者工具 (F12)
-3. 进入 Application → Cookies → icloud.com
-4. 找到以下 Cookie:
-   - `x-apple-session-token` (必需)
-   - `X-APPLE-WEBAUTH-TOKEN` (可选)
-   - `X-APPLE-WEBAUTH-USER` (可选)
+3. 进入 Application → Cookies
+4. 导出全部 Cookie 为 `{"key":"value"}` 格式的 JSON
 
-**完整 Cookie JSON 格式:**
+**关键 Cookie (必需):**
+- `X-APPLE-WEBAUTH-TOKEN` — 认证 token
+- `X-APPLE-WEBAUTH-USER` — 含 dsid (`v=1:s=1:d=22789132008`)
+- `X-APPLE-WEBAUTH-HSA-TRUST` — 设备信任 token
+- `X-APPLE-DS-WEB-SESSION-TOKEN` — 会话 token
 
-```json
-[
-  {
-    "domain": ".icloud.com",
-    "expirationDate": 1735689600,
-    "hostOnly": false,
-    "httpOnly": true,
-    "name": "x-apple-session-token",
-    "path": "/",
-    "sameSite": "unspecified",
-    "secure": true,
-    "session": false,
-    "storeId": "0",
-    "value": "YOUR_SESSION_TOKEN_VALUE"
-  }
-]
-```
+**注意:** 导出的 Cookie 值不要包含多余的引号或转义字符。
 
-### 方式二: App Password 认证
+### 方式二: App Password 认证 (IMAP,优先读邮件)
 
-App Password 认证仅用于读取邮件 (IMAP)。
+App Password 用于 IMAP 读取邮件,是邮件读取的优先路径 (支持服务端按收件人搜索)。
 
 **生成 App Password:**
 
 1. 登录 [appleid.apple.com](https://appleid.apple.com)
 2. 进入 "登录和安全" → "App 专用密码"
-3. 生成新密码，用于此工具
+3. 生成新密码,用于此工具
+
+### 邮件读取双路径
+
+`GET /api/inbox` 自动选择读取方式:
+
+1. **优先: IMAP (App Password)** — 设置了 App Password 时使用,支持服务端按收件人 (`TO`) 搜索
+2. **回退: Web API (Cookie)** — 无 App Password 或 IMAP 失败时,通过 `mccgateway` 端点读取,本地按别名过滤
+
+响应中包含 `"method": "web_api"` 或 `"method": "imap"` 字段,标识实际使用的读取方式。
 
 ## 项目架构
 
@@ -388,19 +392,23 @@ icloud-hme/
     ├── account/
     │   └── manager.go      # 多账号管理器 (持久化、客户端工厂)
     ├── hme/
-    │   └── client.go       # iCloud HME Web 客户端 (Cookie + App Password)
+    │   ├── client.go       # iCloud HME Web 客户端 (Cookie 认证)
+    │   └── auth.go         # SRP 登录 (账号密码 + 2FA 获取 Cookie)
     ├── mail/
-    │   └── client.go       # IMAP 邮件客户端 (邮件读取、搜索)
+    │   ├── client.go       # IMAP 邮件客户端 (App Password 认证)
+    │   └── web_client.go   # Web 邮件客户端 (Cookie 认证,无需 App Password)
     └── server/
         └── server.go       # HTTP API (Gin 路由 + 请求处理)
 ```
 
 ### 核心模块
 
-- **account.Manager**: 管理多个 iCloud 账号，负责配置持久化和客户端创建
-- **hme.Client**: 封装 iCloud HME Web API，支持 Cookie 和 App Password 双认证
-- **mail.Client**: IMAP 邮件客户端，负责连接 iCloud 邮箱、搜索和读取邮件
-- **server.Server**: HTTP API 服务，提供 RESTful 接口
+- **account.Manager**: 管理多个 iCloud 账号,负责配置持久化和客户端创建
+- **hme.Client**: 封装 iCloud HME Web API,支持 Cookie 认证
+- **hme.auth**: SRP 协议登录,支持账号密码 + 可选 2FA
+- **mail.Client**: IMAP 邮件客户端 (App Password,优先读邮件)
+- **mail.WebClient**: 通过 iCloud Web API (mccgateway) 读取邮件,无需 App Password
+- **server.Server**: HTTP API 服务,提供 RESTful 接口
 
 ## 技术栈
 

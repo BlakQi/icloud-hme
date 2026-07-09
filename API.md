@@ -63,22 +63,46 @@ Content-Type: application/json
 GET /api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=20&days=7
 ```
 
-**响应:**
+**响应 (走 IMAP,App Password):**
 ```json
 {
   "success": true,
   "data": {
     "account_id": "acc_1",
     "alias": "xyz123@icloud.com",
-    "count": 5,
+    "count": 2,
+    "method": "imap",
     "messages": [
       {
-        "uid": 12345,
-        "subject": "欢迎注册",
-        "from": "noreply@example.com",
-        "to": ["xyz123@icloud.com"],
-        "date": "2024-01-15T10:35:00Z",
-        "body": "感谢您的注册..."
+        "id": "1042",
+        "from": "GitHub <noreply@github.com>",
+        "to": "xyz123@icloud.com",
+        "subject": "[GitHub] Please verify your email address",
+        "date": "2026-07-09T14:32:10+08:00",
+        "preview": "Almost done! To finish setting up your account, we just need to verify.."
+      }
+    ]
+  }
+}
+```
+
+**响应 (回退到 Web API,Cookie):** `method` 变为 `web_api`
+```json
+{
+  "success": true,
+  "data": {
+    "account_id": "acc_1",
+    "alias": "xyz123@icloud.com",
+    "count": 1,
+    "method": "web_api",
+    "messages": [
+      {
+        "id": "AQMkAD...",
+        "from": "GitHub <noreply@github.com>",
+        "to": "xyz123@icloud.com",
+        "subject": "[GitHub] Please verify your email address",
+        "date": "Wed, 09 Jul 2026 06:32:10 GMT",
+        "preview": "Almost done! To finish setting up your account.."
       }
     ]
   }
@@ -87,13 +111,24 @@ GET /api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=20&days=7
 
 **参数说明:**
 - `account_id` (必填) — 账号 ID
-- `alias` (可选) — 只返回发到该别名的邮件
+- `alias` (可选) — 只返回发到该别名的邮件;不传返回收件箱最近邮件
 - `limit` (可选) — 返回邮件数量，默认 20
-- `days` (可选) — 查找最近几天的邮件，默认 7
+- `days` (可选) — 查找最近几天的邮件，默认 7 (仅 IMAP 模式)
 
-**邮件搜索逻辑:**
-- 原生 IMAP SEARCH: `OR (TO alias) (CC alias)`
-- 本地兜底: 过滤 To/CC/BCC 包含别名的邮件
+**邮件读取双路径 (自动选择):**
+1. **优先: IMAP (App Password)** — 设置了 App Password 时使用,支持服务端按收件人搜索
+2. **回退: Web API (Cookie 认证)** — 无 App Password 或 IMAP 失败时,通过 iCloud mccgateway 端点读取
+
+响应中 `"method": "imap"` 或 `"method": "web_api"` 标识实际使用的读取方式。
+
+**别名过滤逻辑:**
+- **IMAP (`FindByRecipient`):** 先用原生 IMAP `TO` 头搜索 (配合 `days` 时间范围);无结果时拉取最近 `limit*3` 条本地按 `To` 兜底过滤
+- **Web API (`FindByAlias`):** iCloud Web API 不支持按收件人搜索,拉取 `limit*2` (至少 50) 条后本地对 `Subject`/`From`/`To` 做包含匹配
+
+**返回字段差异 (两条路径):**
+- `id` — IMAP 是 UID 数字串,Web API 是 iCloud GUID
+- `date` — IMAP 走 RFC3339,Web API 是原始邮件头 RFC1123 串
+- `preview` — 正文摘要,非完整正文
 
 ---
 
@@ -217,29 +252,10 @@ Content-Type: application/json
 
 ### 6. 删除账号
 
-**Cookie 格式:**
-```json
-[
-  {
-    "domain": ".icloud.com",
-    "name": "x-apple-session-token",
-    "value": "YOUR_TOKEN"
-  },
-  {
-    "domain": ".icloud.com",
-    "name": "X-APPLE-WEBAUTH-TOKEN",
-    "value": "YOUR_TOKEN"
-  }
-]
-```
-
----
-
-### 5. 删除账号
-
 ```http
 DELETE /api/accounts/:id
 ```
+
 
 **响应:**
 ```json
@@ -256,7 +272,7 @@ DELETE /api/accounts/:id
 
 ---
 
-### 6. 设置 App Password
+### 7. 设置 App Password
 
 ```http
 POST /api/accounts/:id/password
@@ -289,7 +305,7 @@ Content-Type: application/json
 
 ## 别名管理接口
 
-### 7. 列出所有别名
+### 8. 列出所有别名
 
 ```http
 GET /api/aliases?account_id=acc_1
@@ -327,7 +343,7 @@ GET /api/aliases?account_id=acc_1
 
 ---
 
-### 8. 停用别名
+### 9. 停用别名
 
 ```http
 POST /api/aliases/:id/deactivate
@@ -357,7 +373,7 @@ Content-Type: application/json
 
 ---
 
-### 9. 激活别名
+### 10. 激活别名
 
 ```http
 POST /api/aliases/:id/reactivate
@@ -387,7 +403,7 @@ Content-Type: application/json
 
 ---
 
-### 10. 删除别名
+### 11. 删除别名
 
 ```http
 DELETE /api/aliases/:id
@@ -422,23 +438,23 @@ Content-Type: application/json
 
 ```bash
 # 创建别名
-curl -X POST http://localhost:8080/api/create \
+curl -X POST http://localhost:8081/api/create \
   -H "Content-Type: application/json" \
   -d '{"account_id": "acc_1", "label": "GitHub"}'
 
 # 读取邮件
-curl "http://localhost:8080/api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=10"
+curl "http://localhost:8081/api/inbox?account_id=acc_1&alias=xyz123@icloud.com&limit=10"
 
 # 列出别名
-curl "http://localhost:8080/api/aliases?account_id=acc_1"
+curl "http://localhost:8081/api/aliases?account_id=acc_1"
 
 # 停用别名
-curl -X POST http://localhost:8080/api/aliases/abc123/deactivate \
+curl -X POST http://localhost:8081/api/aliases/abc123/deactivate \
   -H "Content-Type: application/json" \
   -d '{"account_id": "acc_1"}'
 
 # 删除别名
-curl -X DELETE http://localhost:8080/api/aliases/abc123 \
+curl -X DELETE http://localhost:8081/api/aliases/abc123 \
   -H "Content-Type: application/json" \
   -d '{"account_id": "acc_1"}'
 ```
@@ -448,7 +464,7 @@ curl -X DELETE http://localhost:8080/api/aliases/abc123 \
 ```python
 import requests
 
-BASE_URL = "http://localhost:8080/api"
+BASE_URL = "http://localhost:8081/api"
 
 # 创建别名
 resp = requests.post(f"{BASE_URL}/create", json={
@@ -475,25 +491,53 @@ for alias in resp.json()["data"]["aliases"]:
 
 ## 认证说明
 
-### Cookie 认证 (高级功能)
+### Cookie 认证 (推荐,功能最完整)
 
-用于：创建别名、列出别名、停用/激活/删除别名
+用于：创建别名、列出别名、停用/激活/删除别名、**读取邮件**
 
 **获取方式:**
-1. 浏览器登录 [icloud.com](https://www.icloud.com)
-2. F12 → Application → Cookies → icloud.com
-3. 复制 `x-apple-session-token` 值
+1. 浏览器登录 [icloud.com](https://www.icloud.com) 或 [icloud.com.cn](https://www.icloud.com.cn) (国区)
+2. F12 → Application → Cookies
+3. 导出全部 Cookie 为 `{"key":"value"}` 格式 JSON
+
+**关键 Cookie:**
+- `X-APPLE-WEBAUTH-TOKEN` — 认证 token
+- `X-APPLE-WEBAUTH-USER` — 含 dsid (`v=1:s=1:d=22789132008`)
+- `X-APPLE-WEBAUTH-HSA-TRUST` — 设备信任 token
+- `X-APPLE-DS-WEB-SESSION-TOKEN` — 会话 token
 
 **有效期:** 约 24 小时
 
-### App Password 认证 (IMAP)
+### App Password 认证 (IMAP 回退)
 
-用于：读取邮件
+仅用于 Web API 失败时的邮件读取回退
 
 **获取方式:**
 1. 登录 [appleid.apple.com](https://appleid.apple.com)
 2. 登录和安全 → App 专用密码
 3. 生成新密码
+
+---
+
+## 技术说明
+
+### 邮件读取实现
+
+**Web API 路径** (`internal/mail/web_client.go`):
+1. 调用 `setup.icloud.com.cn/setup/ws/1/validate` 获取 `mccgateway` URL
+2. 调用 `mccgateway/mailws2/v1/thread/search` 读取邮件
+
+**⚠️ 已知坑:**
+- `validate` 返回的 mccgateway URL 可能带 `:443` 端口 (如 `p217-mccgateway.icloud.com.cn:443`)
+- tls-client 的 cookie jar 按不带端口的 host 存储 cookie
+- 带端口请求时 cookie 无法附加,导致 403
+- **解决:** 解析 URL 后剥离端口号
+
+**clientBuildNumber:** 与浏览器一致,当前 `2624Build22`
+
+**IMAP 路径** (`internal/mail/client.go`):
+- 标准 IMAP 协议,连接 `imap.mail.me.com:993`
+- 需要 App Password
 
 ---
 

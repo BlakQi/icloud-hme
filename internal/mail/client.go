@@ -117,11 +117,13 @@ func (c *Client) ListInbox(limit int, days int) ([]Message, error) {
 	seqset := new(imap.SeqSet)
 	seqset.AddRange(from, mbox.Messages)
 
+	// 拉取完整正文,以便填充 Preview(OTP 验证码在正文中)
+	section := &imap.BodySectionName{}
 	items := []imap.FetchItem{
 		imap.FetchUid,
 		imap.FetchEnvelope,
 		imap.FetchInternalDate,
-		imap.FetchRFC822Header,
+		section.FetchItem(),
 	}
 
 	messages := make(chan *imap.Message, limit)
@@ -132,7 +134,7 @@ func (c *Client) ListInbox(limit int, days int) ([]Message, error) {
 
 	var out []Message
 	for msg := range messages {
-		m := toMessage(msg)
+		m := toMessageWithBody(msg)
 		// days 过滤
 		if days > 0 {
 			if t, err := time.Parse(time.RFC1123Z, m.Date); err == nil {
@@ -208,7 +210,9 @@ func (c *Client) fetchByUIDs(uids []uint32, limit int) ([]Message, error) {
 		seqset.AddNum(uid)
 	}
 
-	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchInternalDate, imap.FetchRFC822Header}
+	// 拉取完整正文,以便填充 Preview(OTP 验证码在正文中)
+	section := &imap.BodySectionName{}
+	items := []imap.FetchItem{imap.FetchUid, imap.FetchEnvelope, imap.FetchInternalDate, section.FetchItem()}
 	messages := make(chan *imap.Message, len(uids))
 	done := make(chan error, 1)
 	go func() {
@@ -217,7 +221,7 @@ func (c *Client) fetchByUIDs(uids []uint32, limit int) ([]Message, error) {
 
 	var out []Message
 	for msg := range messages {
-		out = append(out, toMessage(msg))
+		out = append(out, toMessageWithBody(msg))
 	}
 	if err := <-done; err != nil {
 		return nil, err
@@ -292,6 +296,19 @@ func toMessage(msg *imap.Message) Message {
 	}
 	if m.To != "" {
 		m.To = decodeHeader(m.To)
+	}
+	return m
+}
+
+// toMessageWithBody 在 toMessage 基础上解析正文填充 Preview(供 OTP 提取)。
+func toMessageWithBody(msg *imap.Message) Message {
+	m := toMessage(msg)
+	if r := msg.GetBody(&imap.BodySectionName{}); r != nil {
+		if em, err := mail.ReadMessage(r); err == nil {
+			if body, err := readBody(em); err == nil {
+				m.Preview = strings.TrimSpace(body)
+			}
+		}
 	}
 	return m
 }
